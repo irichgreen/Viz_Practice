@@ -1,0 +1,56 @@
+Cancer Type	Both sexes combined	Female	Male
+All cancer types combined	595690	281400	314290
+Acute lymphocytic leukemia	1430	630	800
+Acute myeloid leukemia	10430	4480	5950
+Anus, anal canal and anorectum	1080	640	440
+Bones and joints	1490	630	860
+Brain and other nervous system	16050	6610	9440
+Breast	40890 - Male & female breast cancer combined	40450	440
+Cervix	4120	4120	n/a
+Chronic lymphocytic leukemia	4660	1780	2880
+Chronic myeloid leukemia	1070	500	570
+Colorectum	49190	23170	26020
+Digestive system	153030	64330	88700
+Endocrine system	2940	1540	1400
+Esophagus	15690	2970	12720
+Eye and orbit	280	130	150
+Gallbladder and other biliary	3710	2080	1630
+Genital system	57730	30890	26840
+Hodgkin lymphoma	1120	480	640
+Kidney and renal pelvis	14240	5000	9240
+Larynx	3620	730	2890
+Leukemia	24400	10270	14130
+Liver and intrahepatic bile duct	27170	8890	18280
+Lung and bronchus	158080	72160	85920
+Lymphoma	21270	9110	12160
+Melanoma of the skin	10130	3380	6750
+Mouth	2520	890	1630
+Myeloma	12650	6220	6430
+Non-Hodgkin lymphoma	20150	8630	11520
+Oral cavity and pharynx	9570	2660	6910
+Other and unspecified primary sites	42700	18800	23900
+Other digestive organs	2350	1440	910
+Other endocrine	960	470	490
+Other leukemia	6810	2880	3930
+Other non-epithelial skin	3520	940	2580
+Other oral cavity	1680	370	1310
+Other respiratory organs	810	300	510
+Ovary	14240	14240	n/a
+Pancreas	41780	20330	21450
+Penis and other male genital	340	n/a	340
+Pharynx	3080	680	2400
+Prostate	26120	n/a	26120
+Respiratory system	162510	73190	89320
+Skin (excluding basal and squamous)	13650	4320	9330
+Small intestine	1330	620	710
+Soft tissue (including heart)	4990	2310	2680
+Stomach	10730	4190	6540
+Testis	380	n/a	380
+Thyroid	1980	1070	910
+Tongue	2290	720	1570
+Ureter and other urinary organs	910	370	540
+Urinary bladder	16390	4570	11820
+Urinary system	31540	9940	21600
+Uterine corpus	10470	10470	n/a
+Vagina and other female genital	950	950	n/a
+Vulva	n/a	1110	n/a

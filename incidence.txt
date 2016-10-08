@@ -1,0 +1,11 @@
+Cancer Type	Both sexes combined	Female	Male
+Breast	249260 - Male & female breast cancer combined	246660	2600
+Esophagus	16910	3450	13460
+Kidney and renal pelvis	62700	23050	39650
+Leukemia	60140	26050	34090
+Liver and intrahepatic bile duct	39230	10820	28410
+Lung and bronchus	224390	106470	117920
+Lymphoma	81080	36120	44960
+Ovary	22280	22280	n/a
+Pancreas	53070	25400	27670
+Prostate	180890	n/a	180890
