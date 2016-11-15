@@ -61,7 +61,7 @@ dtm = create_dtm(it, vectorizer, type = "lda_c")
 lda_model = 
     LDA$new(n_topics = 10, vocabulary = v, 
             doc_topic_prior = 0.1, topic_word_prior = 0.01)
-doc_topic_distr = 
+doc_topic_distr = ˜
     lda_model$fit_transform(dtm, n_iter = 1000, convergence_tol = 0.01, 
                             check_convergence_every_n = 10)
 #install.packages("LDAvis")
