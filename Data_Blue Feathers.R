@@ -4,7 +4,7 @@ y1 = cos(x1) / sin(x1)
 x2 = seq(1.02 * 2 * pi + pi/2, 4*pi + pi/2, length = 50)
 y2 = tan(x2)
 
-# set graphical parameters
+# set 그래픽 파라미터
 op = par(bg="black", mar=rep(.5,4))
 
 # plot
