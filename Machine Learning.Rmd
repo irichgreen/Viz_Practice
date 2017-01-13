@@ -1,0 +1,511 @@
+---
+title: "Can we predict flu deaths with Machine Learning and R?"
+author: "Jin-Hoon An"
+date: '2016 12 11 '
+output: html_document
+---
+
+Among the many R packages, there is the outbreaks package. It contains datasets on epidemics, on of which is from the 2013 outbreak of influenza A H7N9 in China, as analysed by Kucharski et al. (2014):
+
+> A. Kucharski, H. Mills, A. Pinsent, C. Fraser, M. Van Kerkhove, C. A. Donnelly, and S. Riley. 2014. Distinguishing between reservoir exposure and human-to-human transmission for emerging pathogens using case onset data. PLOS Currents Outbreaks. Mar 7, edition 1. doi: 10.1371/currents.outbreaks.e1473d9bfc99d080ca242139a06c455f.
+
+> A. Kucharski, H. Mills, A. Pinsent, C. Fraser, M. Van Kerkhove, C. A. Donnelly, and S. Riley. 2014. Data from: Distinguishing between reservoir exposure and human-to-human transmission for emerging pathogens using case onset data. Dryad Digital Repository. http://dx.doi.org/10.5061/dryad.2g43n.
+
+  
+I will be using their data as an example to test whether we can use Machine Learning algorithms for predicting disease outcome.
+
+To do so, I selected and extracted features from the raw data, including age, days between onset and outcome, gender, whether the patients were hospitalised, etc. Missing values were imputed and different model algorithms were used to predict outcome (death or recovery). The prediction accuracy, sensitivity and specificity. The thus prepared dataset was devided into training and testing subsets. The test subset contained all cases with an unknown outcome. Before I applied the models to the test data, I further split the training data into validation subsets.
+
+The tested modeling algorithms were similarly successful at predicting the outcomes of the validation data. To decide on final classifications, I compared predictions from all models and defined the outcome “Death” or “Recovery” as a function of all models, whereas classifications with a low prediction probability were flagged as “uncertain”. Accounting for this uncertainty led to a 100% correct classification of the validation test set.
+
+The training cases with unknown outcome were then classified based on the same algorithms. From 57 unknown cases, 14 were classified as “Recovery”, 10 as “Death” and 33 as uncertain.
+
+
+In a Part 2 I am looking at how extreme gradient boosting performs on this dataset.
+
+
+## The data
+
+The dataset contains case ID, date of onset, date of hospitalisation, date of outcome, gender, age, province and of course the outcome: Death or Recovery. I can already see that there are a couple of missing values in the data, which I will deal with later.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r dataset, message=TRUE, warning=TRUE}
+
+# install and load package
+if (!require("outbreaks", quietly=TRUE)) install.packages("outbreaks")
+library(outbreaks, quietly=TRUE)
+
+# back up original dataset in case something goes awry along the way
+fluH7N9.china.2013_backup <- fluH7N9.china.2013 
+
+# convert ? to NAs
+fluH7N9.china.2013$age[which(fluH7N9.china.2013$age == "?")] <- NA
+
+# create a new column with case ID
+fluH7N9.china.2013$case.ID <- paste("case", fluH7N9.china.2013$case.ID, sep = "_")
+head(fluH7N9.china.2013)
+```
+
+Before I start preparing the data for Machine Learning, I want to get an idea of the distribution of the data points and their different variables by plotting.
+
+Most provinces have only a handful of cases, so I am combining them into the category “other” and keep only Jiangsu, Shanghai and Zhejian and separate provinces.
+
+
+```{r dataload, message=TRUE, warning=TRUE}
+# gather for plotting with ggplot2
+library(tidyr, quietly=TRUE)
+fluH7N9.china.2013_gather <- fluH7N9.china.2013 %>%
+  gather(Group, Date, date.of.onset:date.of.outcome)
+
+# rearrange group order
+fluH7N9.china.2013_gather$Group <- factor(fluH7N9.china.2013_gather$Group, levels = c("date.of.onset", "date.of.hospitalisation", "date.of.outcome"))
+
+# rename groups
+library(plyr, quietly=TRUE)
+fluH7N9.china.2013_gather$Group <- mapvalues(fluH7N9.china.2013_gather$Group, from = c("date.of.onset", "date.of.hospitalisation", "date.of.outcome"), 
+          to = c("Date of onset", "Date of hospitalisation", "Date of outcome"))
+
+# renaming provinces
+fluH7N9.china.2013_gather$province <- mapvalues(fluH7N9.china.2013_gather$province, 
+                                                from = c("Anhui", "Beijing", "Fujian", "Guangdong", "Hebei", "Henan", "Hunan", "Jiangxi", "Shandong", "Taiwan"), 
+                                                to = rep("Other", 10))
+
+# add a level for unknown gender
+levels(fluH7N9.china.2013_gather$gender) <- c(levels(fluH7N9.china.2013_gather$gender), "unknown")
+fluH7N9.china.2013_gather$gender[is.na(fluH7N9.china.2013_gather$gender)] <- "unknown"
+
+# rearrange province order so that Other is the last
+fluH7N9.china.2013_gather$province <- factor(fluH7N9.china.2013_gather$province, levels = c("Jiangsu",  "Shanghai", "Zhejiang", "Other"))
+```
+
+```{r prepare_ggplot2, message=TRUE, warning=TRUE}
+# preparing my ggplot2 theme of choice
+
+library(ggplot2)
+my_theme <- function(base_size = 12, base_family = "sans"){
+  theme_minimal(base_size = base_size, base_family = base_family) +
+  theme(
+    axis.text = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 0.5),
+    axis.title = element_text(size = 14),
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "aliceblue"),
+    strip.background = element_rect(fill = "lightgrey", color = "grey", size = 1),
+    strip.text = element_text(face = "bold", size = 12, color = "black"),
+    legend.position = "bottom",
+    legend.justification = "top", 
+    legend.box = "horizontal",
+    legend.box.background = element_rect(colour = "grey50"),
+    legend.background = element_blank(),
+    panel.border = element_rect(color = "grey", fill = NA, size = 0.5)
+  )
+}
+```
+
+```{r plot_rawdate, message=TRUE, warning=FALSE}
+# plotting raw data
+
+ggplot(data = fluH7N9.china.2013_gather, aes(x = Date, y = as.numeric(age), fill = outcome)) +
+  stat_density2d(aes(alpha = ..level..), geom = "polygon") +
+  geom_jitter(aes(color = outcome, shape = gender), size = 1.5) +
+  geom_rug(aes(color = outcome)) +
+  labs(
+    fill = "Outcome",
+    color = "Outcome",
+    alpha = "Level",
+    shape = "Gender",
+    x = "Date in 2013",
+    y = "Age",
+    title = "2013 Influenza A H7N9 cases in China",
+    subtitle = "Dataset from 'outbreaks' package (Kucharski et al. 2014)",
+    caption = ""
+  ) +
+  facet_grid(Group ~ province) +
+  my_theme() +
+  scale_shape_manual(values = c(15, 16, 17)) +
+  scale_color_brewer(palette="Set1", na.value = "grey50") +
+  scale_fill_brewer(palette="Set1")
+```
+
+This plot shows the dates of onset, hospitalisation and outcome (if known) of each data point. Outcome is marked by color and age shown on the y-axis. Gender is marked by point shape.
+
+The density distribution of date by age for the cases seems to indicate that older people died more frequently in the Jiangsu and Zhejiang province than in Shanghai and in other provinces.
+
+When we look at the distribution of points along the time axis, it suggests that their might be a positive correlation between the likelihood of death and an early onset or early outcome.
+
+
+
+I also want to know how many cases there are for each gender and province and compare the genders’ age distribution.
+
+```{r distribution, message=TRUE, warning=FALSE}
+fluH7N9.china.2013_gather_2 <- fluH7N9.china.2013_gather[, -4] %>%
+  gather(group_2, value, gender:province)
+
+fluH7N9.china.2013_gather_2$value <- mapvalues(fluH7N9.china.2013_gather_2$value, from = c("m", "f", "unknown", "Other"), 
+          to = c("Male", "Female", "Unknown gender", "Other province"))
+
+fluH7N9.china.2013_gather_2$value <- factor(fluH7N9.china.2013_gather_2$value, 
+                                            levels = c("Female", "Male", "Unknown gender", "Jiangsu", "Shanghai", "Zhejiang", "Other province"))
+
+p1 <- ggplot(data = fluH7N9.china.2013_gather_2, aes(x = value, fill = outcome, color = outcome)) +
+  geom_bar(position = "dodge", alpha = 0.7, size = 1) +
+  my_theme() +
+  scale_fill_brewer(palette="Set1", na.value = "grey50") +
+  scale_color_brewer(palette="Set1", na.value = "grey50") +
+  labs(
+    color = "",
+    fill = "",
+    x = "",
+    y = "Count",
+    title = "2013 Influenza A H7N9 cases in China",
+    subtitle = "Gender and Province numbers of flu cases",
+    caption = ""
+  )
+
+p2 <- ggplot(data = fluH7N9.china.2013_gather, aes(x = as.numeric(age), fill = outcome, color = outcome)) +
+  geom_density(alpha = 0.3, size = 1) +
+  geom_rug() +
+  scale_color_brewer(palette="Set1", na.value = "grey50") +
+  scale_fill_brewer(palette="Set1", na.value = "grey50") +
+  my_theme() +
+  labs(
+    color = "",
+    fill = "",
+    x = "Age",
+    y = "Density",
+    title = "",
+    subtitle = "Age distribution of flu cases",
+    caption = ""
+  )
+
+library(gridExtra)
+library(grid)
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+In the dataset, there are more male than female cases and correspondingly, we see more deaths, recoveries and unknown outcomes in men than in women. This is potentially a problem later on for modeling because the inherent likelihoods for outcome are not directly comparable between the sexes.
+
+Most unknown outcomes were recorded in Zhejiang. Similarly to gender, we don’t have an equal distribution of data points across provinces either.
+
+When we look at the age distribution it is obvious that people who died tended to be slightly older than those who recovered. The density curve of unknown outcomes is more similar to that of death than of recovery, suggesting that among these people there might have been more deaths than recoveries.
+
+
+
+And lastly, I want to plot how many days passed between onset, hospitalisation and outcome for each case.
+
+
+```{r hospitalization, message=TRUE, warning=FALSE}
+ggplot(data = fluH7N9.china.2013_gather, aes(x = Date, y = as.numeric(age), color = outcome)) +
+  geom_point(aes(shape = gender), size = 1.5, alpha = 0.6) +
+  geom_path(aes(group = case.ID)) +
+  facet_wrap( ~ province, ncol = 2) +
+  my_theme() +
+  scale_shape_manual(values = c(15, 16, 17)) +
+  scale_color_brewer(palette="Set1", na.value = "grey50") +
+  scale_fill_brewer(palette="Set1") +
+  labs(
+    color = "Outcome",
+    shape = "Gender",
+    x = "Date in 2013",
+    y = "Age",
+    title = "2013 Influenza A H7N9 cases in China",
+    subtitle = "Dataset from 'outbreaks' package (Kucharski et al. 2014)",
+    caption = "\nTime from onset of flu to outcome."
+  )
+```
+
+This plot shows that there are many missing values in the dates, so it is hard to draw a general conclusion.
+
+
+
+## Features
+
+In Machine Learning-speak features are the variables used for model training. Using the right features dramatically influences the accuracy of the model.
+
+Because we don’t have many features, I am keeping age as it is, but I am also generating new features:
+
+from the date information I am calculating the days between onset and outcome and between onset and hospitalisation
+I am converting gender into numeric values with 1 for female and 0 for male
+similarly, I am converting provinces to binary classifiers (yes == 1, no == 0) for Shanghai, Zhejiang, Jiangsu and other provinces
+the same binary classification is given for whether a case was hospitalised, and whether they had an early onset or early outcome (earlier than the median date)
+
+
+```{r dataframe, message=TRUE, warning=FALSE}
+# preparing the data frame for modeling
+# 
+library(dplyr, quietly = TRUE)
+
+dataset <- fluH7N9.china.2013 %>%
+  mutate(hospital = as.factor(ifelse(is.na(date.of.hospitalisation), 0, 1)),
+         gender_f = as.factor(ifelse(gender == "f", 1, 0)),
+         province_Jiangsu = as.factor(ifelse(province == "Jiangsu", 1, 0)),
+         province_Shanghai = as.factor(ifelse(province == "Shanghai", 1, 0)),
+         province_Zhejiang = as.factor(ifelse(province == "Zhejiang", 1, 0)),
+         province_other = as.factor(ifelse(province == "Zhejiang" | province == "Jiangsu" | province == "Shanghai", 0, 1)),
+         days_onset_to_outcome = as.numeric(as.character(gsub(" days", "",
+                                      as.Date(as.character(date.of.outcome), format = "%Y-%m-%d") - 
+                                        as.Date(as.character(date.of.onset), format = "%Y-%m-%d")))),
+         days_onset_to_hospital = as.numeric(as.character(gsub(" days", "",
+                                      as.Date(as.character(date.of.hospitalisation), format = "%Y-%m-%d") - 
+                                        as.Date(as.character(date.of.onset), format = "%Y-%m-%d")))),
+         age = as.numeric(as.character(age)),
+         early_onset = as.factor(ifelse(date.of.onset < summary(fluH7N9.china.2013$date.of.onset)[[3]], 1, 0)),
+         early_outcome = as.factor(ifelse(date.of.outcome < summary(fluH7N9.china.2013$date.of.outcome)[[3]], 1, 0))) %>%
+  subset(select = -c(2:4, 6, 8))
+rownames(dataset) <- dataset$case.ID
+dataset <- dataset[, -1]
+head(dataset)
+```
+
+
+## Imputing missing values
+
+
+When looking at the dataset I created for modeling, it is obvious that we have quite a few missing values.
+
+The missing values from the outcome column are what I want to predict but for the rest I would either have to remove the entire row from the data or impute the missing information. I decided to try the latter with the mice package.
+
+
+```{r impute_data, message=TRUE, warning=FALSE}
+# impute missing data
+
+library(mice, quietly = TRUE)
+
+dataset_impute <- mice(dataset[, -1],  print = FALSE)
+dataset_impute
+
+# recombine imputed data frame with the outcome column
+
+dataset_complete <- merge(dataset[, 1, drop = FALSE], mice::complete(dataset_impute, 1), by = "row.names", all = TRUE)
+rownames(dataset_complete) <- dataset_complete$Row.names
+dataset_complete <- dataset_complete[, -1]
+
+```
+
+
+## Test, train and validation datasets
+
+
+For building the model, I am separating the imputed data frame into training and test data. Test data are the 57 cases with unknown outcome.
+
+```{r test_train, message=TRUE, warning=FALSE}
+summary(dataset$outcome)
+```
+
+
+The training data will be further devided for validation of the models: 70% of the training data will be kept for model building and the remaining 30% will be used for model testing.
+
+I am using the caret package for modeling.
+
+```{r modeling, message=TRUE, warning=FALSE}
+train_index <- which(is.na(dataset_complete$outcome))
+train_data <- dataset_complete[-train_index, ]
+test_data  <- dataset_complete[train_index, -1]
+
+library(caret, quietly = TRUE)
+set.seed(27)
+val_index <- createDataPartition(train_data$outcome, p = 0.7, list=FALSE)
+val_train_data <- train_data[val_index, ]
+val_test_data  <- train_data[-val_index, ]
+val_train_X <- val_train_data[,-1]
+val_test_X <- val_test_data[,-1]
+```
+
+
+## Decision trees
+
+
+To get an idea about how each feature contributes to the prediction of the outcome, I first built a decision tree based on the training data using rpart and rattle.
+
+```{r decision_tree, message=TRUE, warning=FALSE}
+library(rpart, quietly = TRUE)
+library(rattle, quietly = TRUE)
+library(rpart.plot, quietly = TRUE)
+library(RColorBrewer, quietly = TRUE)
+
+set.seed(27)
+fit <- rpart(outcome ~ .,
+                    data = train_data,
+                    method = "class",
+                    control = rpart.control(xval = 10, minbucket = 2, cp = 0), parms = list(split = "information"))
+
+fancyRpartPlot(fit)
+```
+
+
+This randomly generated decision tree shows that cases with an early outcome were most likely to die when they were 68 or older, when they also had an early onset and when they were sick for fewer than 13 days. If a person was not among the first cases and was younger than 52, they had a good chance of recovering, but if they were 82 or older, they were more likely to die from the flu.
+
+
+
+## Feature Importance
+
+
+Not all of the features I created will be equally important to the model. The decision tree already gave me an idea of which features might be most important but I also want to estimate feature importance using a Random Forest approach with repeated cross validation.
+
+
+```{r training_scheme, message=TRUE, warning=FALSE}
+# prepare training scheme
+control <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+# train the model
+set.seed(27)
+model <- train(outcome ~ ., data = train_data, method = "rf", preProcess = NULL, trControl = control)
+
+# estimate variable importance
+importance <- varImp(model, scale=TRUE)
+```
+
+```{r another_plot, message=TRUE, warning=FALSE}
+# prepare for plotting
+importance_df_1 <- importance$importance
+importance_df_1$group <- rownames(importance_df_1)
+
+importance_df_1$group <- mapvalues(importance_df_1$group, 
+                                           from = c("age", "hospital2", "gender_f2", "province_Jiangsu2", "province_Shanghai2", "province_Zhejiang2",
+                                                    "province_other2", "days_onset_to_outcome", "days_onset_to_hospital", "early_onset2", "early_outcome2" ), 
+                                           to = c("Age", "Hospital", "Female", "Jiangsu", "Shanghai", "Zhejiang",
+                                                    "Other province", "Days onset to outcome", "Days onset to hospital", "Early onset", "Early outcome" ))
+f = importance_df_1[order(importance_df_1$Overall, decreasing = FALSE), "group"]
+
+importance_df_2 <- importance_df_1
+importance_df_2$Overall <- 0
+
+importance_df <- rbind(importance_df_1, importance_df_2)
+
+# setting factor levels
+importance_df <- within(importance_df, group <- factor(group, levels = f))
+importance_df_1 <- within(importance_df_1, group <- factor(group, levels = f))
+
+ggplot() +
+  geom_point(data = importance_df_1, aes(x = Overall, y = group, color = group), size = 2) +
+  geom_path(data = importance_df, aes(x = Overall, y = group, color = group, group = group), size = 1) +
+  scale_color_manual(values = rep(brewer.pal(1, "Set1")[1], 11)) +
+  my_theme() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5)) +
+  labs(
+    x = "Importance",
+    y = "",
+    title = "2013 Influenza A H7N9 cases in China",
+    subtitle = "Scaled feature importance",
+    caption = "\nDetermined with Random Forest and
+    repeated cross validation (10 repeats, 10 times)"
+  )
+```
+
+This tells me that age is the most important determining factor for predicting disease outcome, followed by days between onset an outcome, early outcome and days between onset and hospitalisation.
+
+
+## Feature Plot
+
+
+Before I start actually building models, I want to check whether the distribution of feature values is comparable between training, validation and test datasets.
+
+```{r feature_plot, message=TRUE, warning=FALSE}
+# prepare for plotting
+dataset_complete_gather <- dataset_complete %>%
+  mutate(set = ifelse(rownames(dataset_complete) %in% rownames(test_data), "Test Data", 
+                               ifelse(rownames(dataset_complete) %in% rownames(val_train_data), "Validation Train Data",
+                                      ifelse(rownames(dataset_complete) %in% rownames(val_test_data), "Validation Test Data", "NA"))),
+         case_ID = rownames(.)) %>%
+  gather(group, value, age:early_outcome)
+
+dataset_complete_gather$group <- mapvalues(dataset_complete_gather$group, 
+                                           from = c("age", "hospital", "gender_f", "province_Jiangsu", "province_Shanghai", "province_Zhejiang",
+                                                    "province_other", "days_onset_to_outcome", "days_onset_to_hospital", "early_onset", "early_outcome" ), 
+                                           to = c("Age", "Hospital", "Female", "Jiangsu", "Shanghai", "Zhejiang",
+                                                    "Other province", "Days onset to outcome", "Days onset to hospital", "Early onset", "Early outcome" ))
+```
+
+```{r feature_plot2, message=TRUE, warning=FALSE}
+ggplot(data = dataset_complete_gather, aes(x = as.numeric(value), fill = outcome, color = outcome)) +
+  geom_density(alpha = 0.2) +
+  geom_rug() +
+  scale_color_brewer(palette="Set1", na.value = "grey50") +
+  scale_fill_brewer(palette="Set1", na.value = "grey50") +
+  my_theme() +
+  facet_wrap(set ~ group, ncol = 11, scales = "free") +
+  labs(
+    x = "Value",
+    y = "Density",
+    title = "2013 Influenza A H7N9 cases in China",
+    subtitle = "Features for classifying outcome",
+    caption = "\nDensity distribution of all features used for classification of flu outcome."
+  )
+```
+
+```{r feature_plot3, message=TRUE, warning=FALSE}
+ggplot(subset(dataset_complete_gather, group == "Age" | group == "Days onset to hospital" | group == "Days onset to outcome"), 
+       aes(x=outcome, y=as.numeric(value), fill=set)) + geom_boxplot() +
+  my_theme() +
+  scale_fill_brewer(palette="Set1", type = "div ") +
+  facet_wrap( ~ group, ncol = 3, scales = "free") +
+  labs(
+    fill = "",
+    x = "Outcome",
+    y = "Value",
+    title = "2013 Influenza A H7N9 cases in China",
+    subtitle = "Features for classifying outcome",
+    caption = "\nBoxplot of the features age, days from onset to hospitalisation and days from onset to outcome."
+  )
+```
+
+Luckily, the distributions looks reasonably similar between the validation and test data, except for a few outliers.
+
+
+
+## Comparing Machine Learning algorithms
+
+Before I try to predict the outcome of the unknown cases, I am testing the models’ accuracy with the validation datasets on a couple of algorithms. I have chosen only a few more well known algorithms, but caret implements many more.
+
+I have chose to not do any preprocessing because I was worried that the different data distributions with continuous variables (e.g. age) and binary variables (i.e. 0, 1 classification of e.g. hospitalisation) would lead to problems.
+
+
+## Random Forest
+
+Random Forests predictions are based on the generation of multiple classification trees.
+
+This model classified 14 out of 23 cases correctly.
+
+```{r randome_forrest, message=TRUE, warning=FALSE}
+set.seed(27)
+model_rf <- caret::train(outcome ~ .,
+                             data = val_train_data,
+                             method = "rf",
+                             preProcess = NULL,
+                             trControl = trainControl(method = "repeatedcv", number = 10, repeats = 10, verboseIter = FALSE))
+model_rf
+```
+
+```{r randome_forrest2, message=TRUE, warning=FALSE}
+confusionMatrix(predict(model_rf, val_test_data[, -1]), val_test_data$outcome)
+```
+
+
+## Elastic-Net Regularized Generalized Linear Models
+
+**Lasso or elastic net regularization for generalized linear model regression** are based on linear regression models and is useful when we have feature correlation in our model.
+
+This model classified 13 out of 23 cases correctly.
+
+```{r elastic, message=TRUE, warning=FALSE}
+set.seed(27)
+model_glmnet <- caret::train(outcome ~ .,
+                             data = val_train_data,
+                             method = "glmnet",
+                             preProcess = NULL,
+                             trControl = trainControl(method = "repeatedcv", number = 10, repeats = 10, verboseIter = FALSE))
+model_glmnet
+```
+
+```{r elastic2, message=TRUE, warning=FALSE}
+confusionMatrix(predict(model_glmnet, val_test_data[, -1]), val_test_data$outcome)
+```
+
+
